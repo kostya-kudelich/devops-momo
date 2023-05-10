@@ -1,0 +1,49 @@
+variables:
+  VERSION: 1.0.${CI_PIPELINE_ID}
+
+stages:
+  - module-pipelines
+  - update-helm
+  - deploy
+
+
+frontend:
+  stage: module-pipelines
+  trigger:
+    include:
+      - "/frontend/.gitlab-ci.yml"
+    strategy: depend
+  rules:
+    - changes:
+        - frontend/**/*
+
+backend:
+  stage: module-pipelines
+  trigger:
+    include:
+      - "/backend/.gitlab-ci.yml"
+    strategy: depend
+  rules:
+    - changes:
+        - backend/**/*      
+  
+helm:
+  stage: update-helm
+  trigger:
+    include:
+      - "/helm-updater/.gitlab-ci.yml"
+    strategy: depend
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      allow_failure: false   
+      when: manual      
+
+deploy:
+  stage: deploy
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      allow_failure: false 
+      when: manual
+  trigger:
+    project: 'k.kudelich/momo-store-infrastructure'
+    strategy: depend          

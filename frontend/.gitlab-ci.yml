@@ -1,0 +1,67 @@
+cache:
+  paths:
+    - frontend/dist/frontend
+
+variables:
+  SAST_EXCLUDED_ANALYZERS: "gosec"
+
+stages:
+  - build
+  - test
+  - upload
+  - deploy
+
+include:
+  - project: 'templates/ci'
+    file: 'DockerInDockerTemplate.yml'
+  - template: Security/SAST.gitlab-ci.yml
+
+build:
+  stage: build
+  image: docker:20.10.12-dind-rootless
+  before_script:
+    - until docker info; do sleep 1; done
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - cd frontend
+    - >
+      docker build
+      --build-arg VERSION=$VERSION
+      --tag $CI_REGISTRY_IMAGE/momo-frontend:$VERSION
+      .
+    - docker push $CI_REGISTRY_IMAGE/momo-frontend:$VERSION
+  rules:
+    - changes:
+      - frontend/**/*
+
+sonarqube-frontend-sast:
+  stage: test
+  rules:
+    - changes:
+      - frontend/**/*
+  image: sonarsource/sonar-scanner-cli:latest
+  script:
+    - cd frontend
+    - >
+      sonar-scanner
+      -Dsonar.sources=.
+      -Dsonar.projectKey=${SONAR_PROJECT_KEY_FRONTEND}
+      -Dsonar.host.url=${SONARQUBE_URL}
+      -Dsonar.login=${SONAR_LOGIN}
+      -Dsonar.qualitygate.wait=true
+
+upload:
+  variables:
+    GIT_STRATEGY: none
+  image: docker:20.10.12-dind-rootless
+  stage: upload
+  before_script:
+    - until docker info; do sleep 1; done
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker pull $CI_REGISTRY_IMAGE/momo-frontend:$VERSION
+    - docker tag $CI_REGISTRY_IMAGE/momo-frontend:$VERSION $CI_REGISTRY_IMAGE/momo-frontend:latest
+    - docker push $CI_REGISTRY_IMAGE/momo-frontend --all-tags
+  rules:
+    - changes:
+      - frontend/**/*      

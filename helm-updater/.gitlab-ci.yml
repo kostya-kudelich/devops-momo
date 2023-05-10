@@ -1,0 +1,45 @@
+stages:
+  - update-helm
+ 
+include:
+  - project: 'templates/ci'
+    file: 'DockerInDockerTemplate.yml'
+      
+helm:
+  stage: update-helm
+  rules:
+    - changes:
+      - frontend/**/*
+      - backend/**/*
+  image: docker:20.10.12-dind
+  before_script:
+    - until docker info; do sleep 1; done
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - apk update && apk add bash curl git openssh-client
+  script:
+    - git config --global user.email "$GITLAB_USER_EMAIL"
+    - git config --global user.name "helm-updater"
+    - mkdir -p /tmp/momo-store-iac && cd $_
+    - git clone https://$MOMO_INFRASTRUCTURE_TOKEN_NAME:$MOMO_INFRASTRUCTURE_TOKEN_VALUE@$MOMO_INFRASTRUCTURE_GIT_URL
+    - cd momo-store-infrastructure
+    - git switch "main"
+    - 'sed -i -e "s/^appVersion.*/appVersion: $VERSION/" -e "s/^version.*/version: $VERSION/" ./momo-store-chart/Chart.yaml'
+    - >
+      if docker manifest inspect "$CONTAINER_REGISTRY/momo-backend:$VERSION" > /dev/null ; then
+          sed -i -e "/^  - name: backend$/{n;s/^    version.*/    version: $VERSION/;}" ./momo-store-chart/Chart.yaml
+          sed -i -e "s/^appVersion.*/appVersion: $VERSION/" -e "s/^version.*/version: $VERSION/" ./momo-store-chart/charts/backend/Chart.yaml
+          echo "Backend version has been updated."
+      else
+          echo "Backend docker image didn't build in this pipeline.\nBackend version has not been updated."
+      fi
+    - >  
+      if docker manifest inspect "$CONTAINER_REGISTRY/momo-frontend:$VERSION" > /dev/null ; then
+          sed -i -e "/^  - name: frontend$/{n;s/^    version.*/    version: $VERSION/;}" ./momo-store-chart/Chart.yaml
+          sed -i -e "s/^appVersion.*/appVersion: $VERSION/" -e "s/^version.*/version: $VERSION/" ./momo-store-chart/charts/frontend/Chart.yaml
+          echo "Frontend version has been updated."
+      else
+          echo "Frontend docker image didn't build in this pipeline.\nFrontend version has not been updated."
+      fi
+
+    - git commit -a -m "Updated to version $VERSION"
+    - git push origin main
